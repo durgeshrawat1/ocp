@@ -1,3 +1,6 @@
+oc get pods --all-namespaces --field-selector=status.phase!=Running -o=custom-columns='NAMESPACE:.metadata.namespace, POD:.metadata.name, NODE:.spec.nodeName, DEPLOYMENT:.metadata.ownerReferences[?(@.kind=="ReplicaSet")].name, REASON:.status.containerStatuses[0].state.waiting.reason' | grep ImagePullBackOff
+
+
 oc get pods --all-namespaces --field-selector=status.phase!=Running -o=jsonpath='{.items[?(@.status.containerStatuses[0].state.waiting.reason=="ImagePullBackOff")].metadata.name}'
 
 oc get pods --field-selector=status.phase=Failed -o=jsonpath='{range .items[?(@.status.containerStatuses[0].state.waiting.reason=="ImagePullBackOff")]}{"Namespace: "}{.metadata.namespace}{"\tPod: "}{.metadata.name}{"\tNode: "}{.spec.nodeName}{"\tDeployment: "}{.metadata.ownerReferences[?(@.kind=="ReplicaSet")].name}{"\tImage: "}{.spec.containers[*].image}{"\n"}{end}' --all-namespaces | grep <node-name>
