@@ -4,3 +4,8 @@ oc get pods --all-namespaces --field-selector=status.phase!=Running -o=custom-co
 oc get pods --all-namespaces --field-selector=status.phase!=Running -o=jsonpath='{.items[?(@.status.containerStatuses[0].state.waiting.reason=="ImagePullBackOff")].metadata.name}'
 
 oc get pods --field-selector=status.phase=Failed -o=jsonpath='{range .items[?(@.status.containerStatuses[0].state.waiting.reason=="ImagePullBackOff")]}{"Namespace: "}{.metadata.namespace}{"\tPod: "}{.metadata.name}{"\tNode: "}{.spec.nodeName}{"\tDeployment: "}{.metadata.ownerReferences[?(@.kind=="ReplicaSet")].name}{"\tImage: "}{.spec.containers[*].image}{"\n"}{end}' --all-namespaces | grep <node-name>
+
+json_output='{ "request": "abc", "lease": "1", "ten": "r", "due": 5, "data": {"access_key": "key"} }'
+
+# Extract access_key
+echo "$json_output" | grep -o '"access_key"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"access_key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/g'
