@@ -1,0 +1,63 @@
+To establish secure and private connectivity between your AWS account running IBM Turbonomics on EKS and the other 19 AWS accounts without using the internet, you can implement VPC Peering, AWS Transit Gateway, or AWS PrivateLink depending on your needs for scalability, management, and security. Here's an overview of how each solution can help you achieve this:
+
+1. VPC Peering
+VPC Peering is a one-to-one connection between two VPCs that allows resources in each VPC to communicate with each other as if they were within the same network.
+
+Steps:
+Create VPC Peering Connections: Establish a peering connection between the VPC in the AWS account where IBM Turbonomics is installed and each of the other 19 AWS accounts.
+Update Route Tables: Modify the route tables of the VPCs in both the source and destination accounts to ensure that traffic can flow between them.
+Security Groups & Network ACLs: Adjust security groups and network ACLs to allow traffic from the peered VPCs.
+Pros:
+
+Simple to set up for a limited number of VPCs.
+Direct, private communication between VPCs.
+Cons:
+
+For 20 accounts, you'll need 19 VPC peering connections, which may be difficult to manage at scale.
+VPC peering does not support transitive peering, so each account needs a direct connection with the others.
+2. AWS Transit Gateway
+AWS Transit Gateway (TGW) simplifies connectivity between VPCs across multiple accounts and regions by acting as a central hub. It allows communication between all VPCs connected to it, making it ideal for your scenario where multiple accounts need to communicate with each other.
+
+Steps:
+Create a Transit Gateway in the account where IBM Turbonomics is installed.
+Attach VPCs to the Transit Gateway: Attach the VPC in the Turbonomics account as well as the VPCs in the other 19 AWS accounts to the Transit Gateway. This can be done either via a resource share in AWS RAM (Resource Access Manager) or directly via cross-account permissions.
+Update Route Tables: Update route tables to route traffic through the Transit Gateway for communication between the VPCs.
+Control Traffic: Use Transit Gateway route tables to control which VPCs can communicate with each other.
+Pros:
+
+Scalable solution for connecting multiple VPCs across multiple accounts.
+Supports both intra-region and inter-region connectivity.
+Easier to manage at scale than VPC peering.
+Cons:
+
+More complex setup compared to VPC peering.
+Potential additional cost associated with Transit Gateway usage.
+3. AWS PrivateLink
+AWS PrivateLink enables private, secure access to services hosted on AWS using private IP addresses. It is typically used for accessing services running in VPCs from other VPCs without using the internet.
+
+Steps:
+Create PrivateLink Endpoint Services: In the Turbonomics VPC, you will create an endpoint service that makes the Turbonomics application available privately.
+Create VPC Endpoint: In each of the other 19 AWS accounts, create VPC endpoints that point to the service you made available in the Turbonomics VPC.
+Control Traffic via Security Groups: Secure communication by adjusting security groups to ensure that only the allowed accounts can access the service.
+Pros:
+
+Allows service access without VPC peering or Transit Gateway.
+Can provide fine-grained access control, ideal if you want to share specific services (like IBM Turbonomics) with other accounts.
+Cons:
+
+Requires more configuration if you want to expose multiple services across accounts.
+It is not as flexible for routing general traffic between VPCs as Transit Gateway.
+Recommended Approach: AWS Transit Gateway
+Given that you're dealing with 20 accounts and want secure, private connectivity without internet access, AWS Transit Gateway is likely the most scalable and efficient solution. It can simplify management, avoid the need for multiple peering connections, and offer centralized routing control.
+
+Key Benefits of Transit Gateway:
+Centralized Management: Once your VPCs are connected to the Transit Gateway, you can control routing policies from a central place.
+Scalability: Easily scales as you add more VPCs, whether they’re in the same region or across regions.
+Private Connectivity: All communication between accounts stays within the AWS network and does not traverse the internet.
+Example Scenario:
+Create a Transit Gateway in the Turbonomics account.
+Attach the Turbonomics VPC and other VPCs in the 19 other AWS accounts to this Transit Gateway.
+Update Route Tables in each VPC to ensure the traffic goes through the Transit Gateway.
+Use Security Groups and NACLs to limit the traffic flow, ensuring only authorized VPCs can access the necessary services.
+(Optional) Use Transit Gateway Attachments with different route table associations to segment the traffic and control the access rules between the VPCs.
+This setup ensures all your accounts can securely communicate with each other without internet access.
