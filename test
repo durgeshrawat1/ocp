@@ -1,1 +1,164 @@
+The error you're encountering suggests that the module.iam_role is returning an object, but the code tries to access an attribute (eks_role) that doesn’t exist within that object. This can happen if the IAM role or other resources are not being properly referenced or if the output from the module is misused.
+
+Let's fix the issue by ensuring proper referencing and output definitions.
+Step 1: Update the IAM Role Module
+In the IAM Role Module, I should output the role ARN (eks_role_arn), which we can reference in the EKS module.
+
+modules/iam_role/main.tf
+Here, we ensure the role ARN is output correctly.
+
+hcl
+Copy
+resource "aws_iam_role" "eks_role" {
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action    = "sts:AssumeRole"
+        Principal = {
+          Service = "eks.amazonaws.com"
+        }
+        Effect    = "Allow"
+        Sid       = ""
+      }
+    ]
+  })
+  name = var.role_name
+}
+
+resource "aws_iam_policy" "eks_policy" {
+  name        = "eks-cluster-policy"
+  description = "EKS Cluster policy"
+  policy      = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action   = [
+          "eks:DescribeCluster",
+          "eks:ListUpdates",
+          "eks:DescribeUpdate"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      },
+      {
+        Action   = [
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVpcs"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_policy_attachment" {
+  policy_arn = aws_iam_policy.eks_policy.arn
+  role       = aws_iam_role.eks_role.name
+}
+
+output "eks_role_arn" {
+  value = aws_iam_role.eks_role.arn
+}
+modules/iam_role/variables.tf
+No changes needed here for this particular fix, but you should ensure that role_name is being passed correctly.
+
+hcl
+Copy
+variable "role_name" {
+  description = "IAM Role name"
+  type        = string
+}
+Step 2: Update the EKS Module
+Now that the eks_role_arn is output from the IAM Role module, you need to reference it correctly in the EKS module.
+
+modules/eks/main.tf
+Update the EKS module to reference the eks_role_arn output properly.
+
+hcl
+Copy
+resource "aws_eks_cluster" "eks_cluster" {
+  name     = var.cluster_name
+  role_arn = var.eks_role_arn
+
+  vpc_config {
+    subnet_ids = flatten([data.aws_subnet.routable_subnets.*.id, data.aws_subnet.non_routable_subnets.*.id])
+    endpoint_public_access = false
+    endpoint_private_access = true
+    security_group_ids     = [var.security_group_id]
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.eks_policy_attachment]
+}
+modules/eks/variables.tf
+Ensure that eks_role_arn is a variable in this module so it can be passed from the root configuration.
+
+h
+Copy
+variable "cluster_name" {
+  description = "EKS Cluster name"
+  type        = string
+}
+
+variable "eks_role_arn" {
+  description = "IAM Role ARN for the EKS cluster"
+  type        = string
+}
+
+variable "security_group_id" {
+  description = "Security group ID for the EKS cluster"
+  type        = string
+}
+Step 3: Update the Root Configuration
+Finally, in your root configuration (e.g., in environments/us-east-2/main.tf), reference the eks_role_arn output from the IAM Role module and pass it to the EKS module.
+
+environments/us-east-2/main.tf
+Make sure the eks_role_arn from the IAM role module is passed into the EKS module.
+
+hcl
+Copy
+module "vpc" {
+  source                  = "../../modules/vpc"
+  vpc_id                  = "vpc-id"
+  routable_subnet_ids     = ["subnet-xxxx", "subnet-yyyy"]
+  non_routable_subnet_ids = ["subnet-zzzz"]
+}
+
+module "security_group" {
+  source               = "../../modules/security_group"
+  security_group_name  = "eks-security-group"
+  vpc_id               = module.vpc.selected.id
+}
+
+module "iam_role" {
+  source     = "../../modules/iam_role"
+  role_name  = "eks-cluster-role"
+}
+
+module "eks" {
+  source               = "../../modules/eks"
+  cluster_name         = "my-private-eks-cluster"
+  eks_role_arn         = module.iam_role.eks_role_arn
+  security_group_id    = module.security_group.eks_security_group.id
+}
+
+module "addons" {
+  source = "../../modules/addons"
+}
+Step 4: Terraform Apply
+Once you’ve made the changes to the modules and the root configuration, you can now apply the Terraform configuration:
+
+bash
+Copy
+terraform init
+terraform apply
+Summary of Changes:
+IAM Role Module: Added an output "eks_role_arn" to expose the IAM role ARN.
+EKS Module: Correctly references the eks_role_arn from the IAM module.
+Root Configuration: Passes the eks_role_arn from the IAM module to the EKS module.
+This should resolve the error you're seeing and allow you to properly create your private EKS cluster. Let me know if you need further adjustments!
+
+
 
