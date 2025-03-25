@@ -1,0 +1,796 @@
+I have deployed the solution for https://github.com/aws-samples/bedrock-access-gateway and have these API ready. I have 100+ documents in s3 with .xlsx , .erwin, .ppt and .csv format. I want to create a RAG based AI chatbot using AWS bedrock model to find crititical data alements . I want to save vector embedding in documentdb. if there are anything needs to be handled for searches please do. give me end to end code i need to deplopy
+
+ChatGPT said:
+To build a RAG (Retrieval-Augmented Generation) based AI chatbot using AWS Bedrock, you'll follow several key steps to integrate your documents, vector embeddings, and use AWS services like Bedrock, DocumentDB, and SageMaker for NLP tasks. I'll guide you through the process of deploying an end-to-end solution.
+
+Here’s a breakdown of the steps you'll need to take:
+
+Steps:
+Extract Text from Files: Convert the documents (.xlsx, .erwin, .ppt, .csv) into text that can be indexed and used for embeddings.
+
+Generate Embeddings: Use an AWS Bedrock model (like a Hugging Face model) to generate embeddings for the document text.
+
+Store Embeddings in DocumentDB: Store the embeddings along with metadata (e.g., document ID, source file) in Amazon DocumentDB for efficient retrieval.
+
+Search Using Vector Similarity: Implement a mechanism to retrieve relevant documents using vector similarity search based on the query.
+
+Generate Answer: Use AWS Bedrock to augment the query with the retrieved documents and generate an answer.
+
+Deployment: Deploy the entire solution using AWS Lambda, API Gateway, and other services.
+
+High-Level Code Overview:
+I'll break it down into key code snippets for each part of the solution.
+
+1. Extract Text from Documents
+You need to extract text from .xlsx, .erwin, .ppt, and .csv files. Below is how to handle common document types using Python libraries.
+
+Python Libraries to Use:
+
+openpyxl for .xlsx
+
+pandas for .csv
+
+python-pptx for .ppt
+
+py-erwin for .erwin (custom solution depending on how .erwin files are formatted)
+
+Extracting text from .xlsx and .csv
+python
+Copy
+import openpyxl
+import pandas as pd
+from pptx import Presentation
+
+# For XLSX files
+def extract_text_from_xlsx(file_path):
+    workbook = openpyxl.load_workbook(file_path)
+    text = []
+    for sheet in workbook.sheetnames:
+        ws = workbook[sheet]
+        for row in ws.iter_rows():
+            for cell in row:
+                text.append(str(cell.value))
+    return " ".join(text)
+
+# For CSV files
+def extract_text_from_csv(file_path):
+    df = pd.read_csv(file_path)
+    return df.to_string()
+
+# For PPTX files
+def extract_text_from_ppt(file_path):
+    prs = Presentation(file_path)
+    text = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                text.append(shape.text)
+    return " ".join(text)
+For .erwin files, you'll need to find a parser for this specific format, as it's less common. You may either write your own parser or use a library if available.
+2. Generate Embeddings Using AWS Bedrock
+For embedding generation, you can use AWS Bedrock, which provides access to multiple foundation models. To generate embeddings, you'd likely use models like those from Hugging Face (if available in Bedrock).
+
+Code to generate embeddings using AWS SDK:
+
+python
+Copy
+import boto3
+
+# Initialize the Bedrock client
+client = boto3.client("bedrock", region_name="us-east-1")
+
+def get_embeddings(text):
+    response = client.invoke_model(
+        modelId="huggingface-text-embedding-model",  # Replace with actual model ID
+        body=text.encode("utf-8")
+    )
+    embeddings = response['body'].read()
+    return embeddings
+3. Store Embeddings in DocumentDB
+Once you have generated embeddings, you need to store them in DocumentDB. DocumentDB is compatible with MongoDB, so you can use the pymongo library.
+
+python
+Copy
+from pymongo import MongoClient
+
+# Connect to DocumentDB (MongoDB compatible)
+client = MongoClient("mongodb://<username>:<password>@<documentdb-endpoint>:27017")
+db = client["document_embeddings"]
+collection = db["embeddings"]
+
+# Insert embeddings into DocumentDB
+def store_embedding(doc_id, embedding, metadata):
+    document = {
+        "doc_id": doc_id,
+        "embedding": embedding,
+        "metadata": metadata  # e.g., file type, source, etc.
+    }
+    collection.insert_one(document)
+4. Search Using Vector Similarity
+You need to implement a search function that compares query embeddings with stored document embeddings. One way to do this is by calculating cosine similarity between vectors.
+
+python
+Copy
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+def find_most_similar_document(query_embedding):
+    # Retrieve all stored embeddings from DocumentDB
+    stored_embeddings = collection.find()
+    
+    best_match = None
+    max_similarity = -1
+
+    for doc in stored_embeddings:
+        stored_embedding = np.array(doc['embedding'])
+        similarity = cosine_similarity([query_embedding], [stored_embedding])[0][0]
+        if similarity > max_similarity:
+            best_match = doc
+            max_similarity = similarity
+
+    return best_match
+5. Generate Answer Using AWS Bedrock
+Once you have retrieved the relevant document(s), you can pass them to an AWS Bedrock model to generate an answer to the user’s query.
+
+python
+Copy
+def generate_answer(query, retrieved_documents):
+    context = " ".join([doc['metadata']['text'] for doc in retrieved_documents])
+    
+    response = client.invoke_model(
+        modelId="huggingface-qa-model",  # Replace with actual model ID for QA
+        body=f"{query} Context: {context}".encode("utf-8")
+    )
+    answer = response['body'].read().decode("utf-8")
+    return answer
+6. Deploy the Solution
+To deploy this solution:
+
+Use AWS Lambda to run the backend code (e.g., extracting documents, generating embeddings, and responding to queries).
+
+Use API Gateway to expose the Lambda function as an HTTP API for your chatbot.
+
+Use Amazon Cognito for secure access if needed.
+
+Ensure that DocumentDB is set up correctly, and your Lambda has permissions to access it.
+
+Example Lambda Function (Simplified):
+python
+Copy
+import json
+import boto3
+from pymongo import MongoClient
+
+# AWS SDK clients
+bedrock_client = boto3.client("bedrock", region_name="us-east-1")
+lambda_client = boto3.client("lambda")
+
+# Connect to MongoDB (DocumentDB)
+client = MongoClient("mongodb://<username>:<password>@<documentdb-endpoint>:27017")
+db = client["document_embeddings"]
+collection = db["embeddings"]
+
+def lambda_handler(event, context):
+    query = event["query"]
+    
+    # Step 1: Generate Query Embedding
+    query_embedding = get_embeddings(query)
+    
+    # Step 2: Find Most Relevant Document
+    best_match = find_most_similar_document(query_embedding)
+    
+    # Step 3: Generate Answer
+    answer = generate_answer(query, [best_match])
+    
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'answer': answer})
+    }
+7. Set Up API Gateway
+Create a new REST API using AWS API Gateway.
+
+Set up a new endpoint (e.g., POST /query) that triggers your Lambda function.
+
+Test the endpoint with POST requests containing user queries.
+
+8. Optional: Integrate with Chatbot Framework
+You can integrate this solution into an AI chatbot interface using frameworks like:
+
+AWS Lex: For voice or text-based conversation.
+
+Custom Frontend: Use a React app to interact with the API.
+
+This should give you a comprehensive end-to-end solution for building a Retrieval-Augmented Generation (RAG) based AI chatbot on AWS, leveraging Bedrock, DocumentDB, and other AWS services.
+
+
+You said:
+your process to generate embedding , storing them in documentdb and retreiving is not clear . I don;t think thats the right approach ? along with embedding - what all metedata will get saved in collection ? is there a way to automatically generate it and load it without any manual work
+
+ChatGPT said:
+You're absolutely correct in pointing out that the process of generating, storing, and retrieving embeddings needs more clarity and refinement, particularly around how to store the embeddings and metadata in DocumentDB in a way that is automated and efficient. Let’s go through the entire process step by step in a more structured way and include the key points you're asking about.
+
+Updated Approach:
+1. Text Extraction from Documents
+First, you'll need to extract the text content from the different document formats (Excel, CSV, PPT, etc.) as I outlined before. This part is fine and will be handled by code like the examples I gave above. You’ll use libraries like openpyxl, python-pptx, pandas, etc., to handle different formats.
+
+2. Generate Embeddings
+The key here is to generate embeddings for each document content. Typically, you'll use an NLP model from a service like AWS Bedrock (or Hugging Face, if you are using their models), which can take raw text and generate dense vector embeddings (numerical representations of the text).
+
+Let’s assume we’ll use a transformer-based embedding model, like those available in Hugging Face through AWS Bedrock.
+
+Here’s how you can generate embeddings using a model from AWS Bedrock.
+
+python
+Copy
+import boto3
+
+# Initialize the Bedrock client
+client = boto3.client('bedrock', region_name='us-east-1')
+
+# Generate Embeddings Function
+def generate_embeddings(text):
+    # Replace 'huggingface-text-embedding-model' with the actual model in AWS Bedrock
+    response = client.invoke_model(
+        modelId='huggingface-text-embedding-model',  # Example: Replace with actual Bedrock model ID
+        body=text.encode('utf-8'),
+    )
+    embeddings = response['body'].read()
+    return embeddings
+3. Storing Embeddings in DocumentDB
+DocumentDB (MongoDB) is a NoSQL database that stores documents in JSON-like format. Here’s how we should handle storing the embeddings and metadata:
+
+Embeddings: The actual vector embedding generated by the model (usually a high-dimensional float array).
+
+Metadata: Additional metadata about each document that can help you understand what the document is, such as:
+
+doc_id: A unique identifier for the document.
+
+source: The original document’s file name or path (e.g., example.xlsx).
+
+text: The extracted text from the document (optional, could be truncated or summarized).
+
+file_type: The type of file (e.g., xlsx, csv, ppt).
+
+timestamp: The timestamp when the document was processed.
+
+embedding: The embedding vector generated.
+
+Here’s a refined function that stores both embeddings and metadata in DocumentDB (MongoDB-compatible).
+
+python
+Copy
+from pymongo import MongoClient
+import numpy as np
+import json
+
+# Connect to DocumentDB (MongoDB-compatible)
+client = MongoClient("mongodb://<username>:<password>@<documentdb-endpoint>:27017")
+db = client['document_embeddings']
+collection = db['embeddings']
+
+# Store Embedding and Metadata in DocumentDB
+def store_embedding(doc_id, embedding, metadata):
+    document = {
+        "doc_id": doc_id,
+        "embedding": embedding.tolist(),  # Convert numpy array to list
+        "metadata": metadata
+    }
+    collection.insert_one(document)
+
+# Example metadata
+metadata = {
+    "source": "example.xlsx",
+    "file_type": "xlsx",
+    "timestamp": "2025-03-25T10:00:00Z"
+}
+
+# Example: Storing embedding
+doc_id = "unique-doc-id"
+embedding = np.random.rand(512)  # Example: Use actual embedding generated
+store_embedding(doc_id, embedding, metadata)
+What Metadata Gets Stored?
+The metadata stored for each document should provide essential context that will allow you to manage and retrieve data efficiently. The essential metadata fields could include:
+
+doc_id: A unique identifier for each document.
+
+source: The file name or URL of the document (e.g., file1.xlsx).
+
+file_type: The type of the document (e.g., xlsx, csv, ppt).
+
+text: A truncated or full version of the extracted text. You can choose to store the full text or just the relevant sections (e.g., first 1000 characters).
+
+timestamp: The date and time when the document was processed.
+
+embedding: The actual vector embedding for the text extracted from the document.
+
+4. Automatic Loading of Documents and Metadata
+To automate the entire pipeline (loading, processing, embedding, and storing), you can do the following:
+
+Monitor S3 for New Documents: Use an AWS Lambda function to monitor an S3 bucket for new file uploads (or use S3 Event Notifications).
+
+Text Extraction: Once a new file is uploaded, the Lambda function will be triggered, and the document will be extracted and processed.
+
+Embedding Generation: After extracting the text, generate embeddings using the Bedrock model.
+
+Store Embedding and Metadata in DocumentDB: Save both embeddings and metadata to DocumentDB.
+
+Here’s an example Lambda function that can trigger upon an S3 event, process the file, generate embeddings, and store them in DocumentDB.
+
+Lambda Function (Auto Process and Store)
+python
+Copy
+import boto3
+import json
+from pymongo import MongoClient
+import openpyxl
+import pandas as pd
+from pptx import Presentation
+import numpy as np
+
+# Initialize AWS clients
+bedrock_client = boto3.client('bedrock', region_name='us-east-1')
+s3_client = boto3.client('s3')
+client = MongoClient("mongodb://<username>:<password>@<documentdb-endpoint>:27017")
+
+# Connect to DocumentDB
+db = client['document_embeddings']
+collection = db['embeddings']
+
+# Helper function to extract text from various document types
+def extract_text_from_s3_file(bucket, key):
+    # Download file from S3
+    file_path = '/tmp/' + key.split('/')[-1]
+    s3_client.download_file(bucket, key, file_path)
+    
+    text = ""
+    if file_path.endswith(".xlsx"):
+        text = extract_text_from_xlsx(file_path)
+    elif file_path.endswith(".csv"):
+        text = extract_text_from_csv(file_path)
+    elif file_path.endswith(".pptx"):
+        text = extract_text_from_ppt(file_path)
+    # Add other file handlers if needed
+    return text
+
+def extract_text_from_xlsx(file_path):
+    workbook = openpyxl.load_workbook(file_path)
+    text = []
+    for sheet in workbook.sheetnames:
+        ws = workbook[sheet]
+        for row in ws.iter_rows():
+            for cell in row:
+                text.append(str(cell.value))
+    return " ".join(text)
+
+def extract_text_from_csv(file_path):
+    df = pd.read_csv(file_path)
+    return df.to_string()
+
+def extract_text_from_ppt(file_path):
+    prs = Presentation(file_path)
+    text = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                text.append(shape.text)
+    return " ".join(text)
+
+# Generate Embedding Using Bedrock
+def generate_embeddings(text):
+    response = bedrock_client.invoke_model(
+        modelId='huggingface-text-embedding-model',
+        body=text.encode('utf-8'),
+    )
+    embeddings = response['body'].read()
+    return embeddings
+
+# Store Embedding in DocumentDB
+def store_embedding(doc_id, embedding, metadata):
+    document = {
+        "doc_id": doc_id,
+        "embedding": embedding.tolist(),
+        "metadata": metadata
+    }
+    collection.insert_one(document)
+
+def lambda_handler(event, context):
+    bucket = event['Records'][0]['s3']['bucket']['name']
+    key = event['Records'][0]['s3']['object']['key']
+    
+    # Extract Text from the document
+    text = extract_text_from_s3_file(bucket, key)
+    
+    # Generate Embedding for the text
+    embedding = generate_embeddings(text)
+    
+    # Create Metadata
+    metadata = {
+        "source": key,
+        "file_type": key.split('.')[-1],  # Assuming file extension is used for type
+        "timestamp": event['Records'][0]['eventTime']
+    }
+    
+    # Generate Document ID (could be the S3 key or a new unique ID)
+    doc_id = key
+    
+    # Store Embedding and Metadata in DocumentDB
+    store_embedding(doc_id, embedding, metadata)
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Embedding generated and stored successfully')
+    }
+Explanation:
+Trigger: The Lambda function is triggered by an S3 event when a new file is uploaded.
+
+Text Extraction: Based on the file type, the appropriate extraction function (for .xlsx, .csv, .pptx, etc.) is used to extract text.
+
+Embedding Generation: The extracted text is passed to AWS Bedrock to generate embeddings.
+
+Storing Embeddings and Metadata: Both the embedding and its metadata are stored in DocumentDB for later retrieval.
+
+5. Vector Similarity Search
+To search for similar documents, you’ll retrieve the embeddings from DocumentDB and calculate cosine similarity or another similarity metric. Here's an example function to find similar documents.
+
+python
+Copy
+from sklearn.metrics.pairwise import cosine_similarity
+
+def search_similar_documents(query_embedding):
+    # Retrieve all embeddings from DocumentDB
+    stored_embeddings = collection.find()
+    
+    best_match = None
+    max_similarity = -1
+    
+    for doc in stored_embeddings:
+        stored_embedding = np.array(doc['embedding'])
+        similarity = cosine_similarity([query_embedding], [stored_embedding])[0][0]
+        if similarity > max_similarity:
+            best_match = doc
+            max_similarity = similarity
+    
+    return best_match
+Final Thoughts
+This approach ensures that embeddings and metadata are stored together in DocumentDB. The extraction, embedding generation, and storing process is automated using Lambda and triggered by S3 events. The metadata helps you manage your documents and retrieval process efficiently, and the embeddings can be used for similarity-based search.
+
+By automating the entire process, you eliminate manual intervention and create a scalable solution for indexing and searching large volumes of documents.
+
+
+You said:
+my idea is to generate response from these documents. i am matching document
+
+ChatGPT said:
+Thank you for the clarification! It sounds like your goal is to build a system where a user query can be answered by retrieving relevant information from a large set of documents (like .xlsx, .csv, .ppt, etc.), and then using those documents to generate a response through a retrieval-augmented generation (RAG) system. The key steps would involve:
+
+Document Matching: You first match the user’s query with relevant documents based on vector similarity (matching document embeddings with the query embedding).
+
+Answer Generation: Once you retrieve the relevant documents, you need to use those to generate an answer by combining the document contents and the query.
+
+High-Level Workflow:
+Extract Text from Documents: Extract the text from your documents.
+
+Generate Embeddings: Convert the text into vector embeddings using a model like AWS Bedrock or a Hugging Face model.
+
+Store Embeddings in DocumentDB: Store both the embeddings and metadata (source, file type, timestamp, etc.) in DocumentDB.
+
+Query Matching: When the user submits a query, generate the query's embedding, match it with the stored document embeddings (using cosine similarity or another metric), and retrieve the top N most relevant documents.
+
+Generate a Response: Use the retrieved documents as context for generating a response (this is the RAG part). You can use a generative model (like GPT-4 or another LLM) to craft an answer by feeding in the matched document text alongside the user query.
+
+Let’s dive into the code to achieve that.
+
+1. Document Matching - Retrieving the Relevant Documents
+We will first match the user query with the relevant documents based on vector similarity.
+
+python
+Copy
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+# Function to find the most similar document based on query embedding
+def find_similar_documents(query_embedding, top_n=3):
+    # Retrieve all stored embeddings from DocumentDB (MongoDB)
+    stored_embeddings = collection.find()
+    
+    best_matches = []
+    similarities = []
+    
+    for doc in stored_embeddings:
+        stored_embedding = np.array(doc['embedding'])
+        
+        # Compute cosine similarity between query and stored document embeddings
+        similarity = cosine_similarity([query_embedding], [stored_embedding])[0][0]
+        
+        similarities.append((doc, similarity))
+    
+    # Sort by similarity score (higher similarity comes first)
+    sorted_matches = sorted(similarities, key=lambda x: x[1], reverse=True)
+    
+    # Return the top N similar documents
+    top_matches = [match[0] for match in sorted_matches[:top_n]]
+    
+    return top_matches
+2. Generating Embeddings for User Query
+To match the user’s query with your stored documents, you need to generate embeddings for the user query, similar to how you generated embeddings for your documents.
+
+python
+Copy
+# Function to generate embedding for the user query
+def generate_query_embedding(query):
+    response = bedrock_client.invoke_model(
+        modelId='huggingface-text-embedding-model',  # Use appropriate model ID
+        body=query.encode('utf-8')
+    )
+    query_embedding = np.array(response['body'].read())  # Convert to numpy array if needed
+    return query_embedding
+3. Answer Generation Using Retrieved Documents (RAG)
+Now, once we have the relevant documents (based on their embeddings), we will use these documents as context to generate a response. For this, you’ll need a generative model (like GPT-4 or another large language model).
+
+Here’s how you can use the top documents to generate a response:
+
+python
+Copy
+# Function to generate response using retrieved documents
+def generate_answer(query, retrieved_documents):
+    # Combine the text of retrieved documents into a context
+    context = " ".join([doc['metadata']['text'][:1000] for doc in retrieved_documents])  # Truncate text to avoid exceeding model input size
+    
+    # Format prompt with the query and context (this is the RAG setup)
+    prompt = f"Query: {query}\n\nContext: {context}\n\nAnswer:"
+    
+    # Use a generative model (e.g., GPT-4) to generate the response
+    response = bedrock_client.invoke_model(
+        modelId='gpt-4-model',  # Replace with the actual generative model
+        body=prompt.encode('utf-8')
+    )
+    
+    answer = response['body'].read().decode('utf-8')
+    return answer
+4. End-to-End Workflow
+The end-to-end flow would look something like this:
+
+User Query: The user submits a query.
+
+Generate Query Embedding: Generate an embedding for the query.
+
+Retrieve Documents: Find the most relevant documents by comparing the query embedding with the stored embeddings.
+
+Answer Generation: Use the retrieved documents as context and generate a response.
+
+Here’s how that would look in code:
+
+python
+Copy
+def handle_user_query(query):
+    # Step 1: Generate the query embedding
+    query_embedding = generate_query_embedding(query)
+    
+    # Step 2: Find the most similar documents
+    retrieved_documents = find_similar_documents(query_embedding, top_n=3)
+    
+    # Step 3: Generate an answer using the retrieved documents
+    answer = generate_answer(query, retrieved_documents)
+    
+    return answer
+5. Triggering the Process:
+Now, you can tie this all together by creating a function that you can expose as an API endpoint (e.g., via AWS API Gateway and Lambda) or call directly from a frontend (e.g., React, Angular).
+
+6. Fine-Tuning for Improved Matching and Response Generation:
+Document Retrieval Tuning: You can improve the document retrieval process by experimenting with different similarity metrics (like cosine, Euclidean distance, etc.), or by adjusting the number of top matches (top_n).
+
+Prompt Engineering: Experiment with how you format the query and context in the generative model prompt. You can refine the context part by summarizing or chunking the documents to ensure you’re within token limits for the model.
+
+7. Automating Document and Query Processing
+You can automate the entire process by setting up:
+
+S3 Event Triggers: To upload new documents to S3, trigger the document processing pipeline (extract, generate embeddings, store in DocumentDB).
+
+Lambda/API Gateway: To handle user queries automatically by triggering the query processing function and generating responses.
+
+8. Considerations for Real-World Use:
+Scaling: If you have a large number of documents, consider using a vector database like Pinecone or FAISS to store and search embeddings. These services are designed for efficient similarity searches and can scale more easily than DocumentDB.
+
+Document Chunking: For larger documents, you may need to break them into smaller chunks (e.g., paragraphs or sections) and then generate embeddings for each chunk to make the search more granular.
+
+Summary:
+Document Matching: Match the user’s query to the most relevant documents based on their embeddings using cosine similarity.
+
+Answer Generation: Use the matched documents as context to generate a response using a generative model (e.g., GPT-4).
+
+Automation: Automate the pipeline for document processing, embedding generation, and query-answering.
+
+This process allows you to build a Retrieval-Augmented Generation (RAG) system that can dynamically generate responses based on the most relevant documents in your dataset.
+
+
+You said:
+https://github.com/aws-samples/bedrock-access-gateway - i said i have APIs from this github solution already that calls all bedrock models. why are you not using them in your response
+
+ChatGPT said:
+I apologize for the confusion! I now understand that you're already using the APIs from the bedrock-access-gateway solution, which allows you to interact with AWS Bedrock models directly, and you're looking to build on that instead of calling AWS Bedrock directly via SDKs.
+
+Let me adjust the solution and show you how you can integrate the Bedrock API Gateway (which you have already set up) for generating embeddings, storing them, and then retrieving them for building your RAG-based AI chatbot.
+
+Updated Approach: Leveraging the Bedrock API Gateway Solution
+Since the Bedrock API Gateway already exposes endpoints for interacting with AWS Bedrock models (like embedding generation), we can modify the approach to use those API calls instead of invoking Bedrock directly via the SDK.
+
+1. Text Extraction from Documents
+The document extraction part remains the same. For each document format (e.g., .xlsx, .pptx, .csv), we extract the text as previously shown.
+
+2. Generate Embeddings Using the Bedrock API Gateway
+Instead of invoking Bedrock directly via the SDK, we’ll call your API Gateway to generate embeddings. This simplifies the process and ensures you're using the existing APIs.
+
+Let's assume that your API Gateway exposes an endpoint (e.g., POST /generate-embedding) that takes text and returns embeddings. The general flow will be:
+
+Extract the text from the documents.
+
+Call the API Gateway to generate embeddings.
+
+Store the embeddings and relevant metadata in DocumentDB.
+
+Here’s an example of how to make the API call to the Bedrock API Gateway for embedding generation:
+
+python
+Copy
+import requests
+import json
+
+# API Gateway endpoint URL (replace with actual endpoint)
+api_gateway_url = 'https://your-api-gateway-url.amazonaws.com/generate-embedding'
+
+# Function to generate embeddings using the Bedrock API Gateway
+def generate_embeddings_using_api_gateway(text):
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    
+    payload = {
+        'text': text,
+    }
+    
+    response = requests.post(api_gateway_url, data=json.dumps(payload), headers=headers)
+    
+    if response.status_code == 200:
+        embedding = response.json().get('embedding')
+        return embedding
+    else:
+        print("Error generating embedding:", response.text)
+        return None
+This function sends the document text to your API Gateway, which in turn will interact with AWS Bedrock to generate the embeddings.
+
+The response contains the embedding, which you can store in DocumentDB alongside metadata.
+
+3. Storing Embeddings and Metadata in DocumentDB
+Once the embedding is generated, you can store the embedding and its metadata in DocumentDB. The metadata will help you retrieve the document later, and the embedding allows for similarity search.
+
+Here’s how you can store the embeddings and metadata in DocumentDB (MongoDB-compatible):
+
+python
+Copy
+from pymongo import MongoClient
+import numpy as np
+
+# Connect to DocumentDB (MongoDB-compatible)
+client = MongoClient("mongodb://<username>:<password>@<documentdb-endpoint>:27017")
+db = client['document_embeddings']
+collection = db['embeddings']
+
+# Store Embedding and Metadata in DocumentDB
+def store_embedding(doc_id, embedding, metadata):
+    document = {
+        "doc_id": doc_id,
+        "embedding": embedding.tolist(),  # Convert numpy array to list
+        "metadata": metadata
+    }
+    collection.insert_one(document)
+
+# Example metadata
+metadata = {
+    "source": "example.xlsx",
+    "file_type": "xlsx",
+    "timestamp": "2025-03-25T10:00:00Z"
+}
+
+# Example: Storing embedding
+doc_id = "unique-doc-id"
+embedding = np.random.rand(512)  # Use the actual embedding from Bedrock API
+store_embedding(doc_id, embedding, metadata)
+4. Retrieving Relevant Documents Using Embeddings
+To retrieve relevant documents based on a user query, you will follow a similar process:
+
+Generate the query embedding by calling the Bedrock API Gateway.
+
+Compare the query embedding with the stored embeddings using cosine similarity or another similarity metric.
+
+Retrieve the most relevant documents.
+
+Here’s how to generate the query embedding and retrieve the most similar documents:
+
+python
+Copy
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Function to generate query embedding using API Gateway
+def generate_query_embedding(query):
+    return generate_embeddings_using_api_gateway(query)
+
+# Function to find the most similar document based on query embedding
+def find_similar_documents(query_embedding, top_n=3):
+    # Retrieve all stored embeddings from DocumentDB
+    stored_embeddings = collection.find()
+    
+    best_matches = []
+    similarities = []
+    
+    for doc in stored_embeddings:
+        stored_embedding = np.array(doc['embedding'])
+        
+        # Compute cosine similarity between query and stored document embeddings
+        similarity = cosine_similarity([query_embedding], [stored_embedding])[0][0]
+        
+        similarities.append((doc, similarity))
+    
+    # Sort by similarity score (higher similarity comes first)
+    sorted_matches = sorted(similarities, key=lambda x: x[1], reverse=True)
+    
+    # Return the top N similar documents
+    top_matches = [match[0] for match in sorted_matches[:top_n]]
+    
+    return top_matches
+5. Answer Generation Using Retrieved Documents
+Once the most relevant documents are retrieved, you will use them as context to generate an answer to the user's query. For generating the response, you would typically use a generative model (e.g., GPT-4, which could be part of your Bedrock API Gateway as well).
+
+Assuming your Bedrock API Gateway exposes another endpoint for generating responses (e.g., POST /generate-response), you can call this API to generate an answer based on the context of the matched documents.
+
+python
+Copy
+# Function to generate response using the Bedrock API Gateway
+def generate_answer_using_api_gateway(query, retrieved_documents):
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    
+    # Combine the text of retrieved documents into a context
+    context = " ".join([doc['metadata']['text'][:1000] for doc in retrieved_documents])  # Truncate text to avoid exceeding model input size
+    
+    # Prepare the prompt
+    prompt = f"Query: {query}\n\nContext: {context}\n\nAnswer:"
+    
+    payload = {
+        'query': query,
+        'context': context
+    }
+    
+    # Call the API Gateway for answer generation
+    response = requests.post('https://your-api-gateway-url.amazonaws.com/generate-response', data=json.dumps(payload), headers=headers)
+    
+    if response.status_code == 200:
+        answer = response.json().get('answer')
+        return answer
+    else:
+        print("Error generating answer:", response.text)
+        return None
+6. Complete End-to-End Example
+Here’s the full flow combined together in a simple function:
+
+python
+Copy
+def handle_user_query(query):
+    # Step 1: Generate the query embedding using the API Gateway
+    query_embedding = generate_query_embedding(query)
+    
+    # Step 2: Find the most similar documents using cosine similarity
+    retrieved_documents = find_similar_documents(query_embedding, top_n=3)
+    
+    # Step 3: Generate an answer using the Bedrock API Gateway and the retrieved documents
+    answer = generate_answer_using_api_gateway(query, retrieved_documents)
+    
+    return answer
+7. Final Thoughts
+API Gateway Integration: By using your Bedrock API Gateway, you avoid the need for custom SDK calls, and everything flows seamlessly with the existing infrastructure.
+
+Automated Processing: This setup can be fully automated using S3 events and AWS Lambda, just as described earlier. For example, when a new document is uploaded, the document is processed to generate embeddings, which are stored in DocumentDB for later use.
+
+Optimizing Embedding Search: If you need to scale your solution and optimize for larger datasets, consider using a vector search database (like Pinecone or FAISS) for storing and querying embeddings. This will provide faster retrieval and better performance with larger sets of embeddings.
+
+Let me know if you need more help with specific parts of this solution
